@@ -97,6 +97,7 @@ const formatFunction = {
     link: linkPart => tag.a({href: linkPart.url, className: "link", target: "_blank", rel: "noopener" }, renderParts(linkPart.inlines)),
     pill: renderPill,
     format: formatPart => tag[formatPart.format](renderParts(formatPart.children)),
+    rule: rulePart => tag.hr(),
     list: renderList,
     image: renderImage,
     newline: () => tag.br()
@@ -104,6 +105,9 @@ const formatFunction = {
 
 function renderPart(part) {
     const f = formatFunction[part.type];
+    if (!f) {
+        return text(`[unknown part type ${part.type}]`);
+    }
     return f(part);
 }
 
