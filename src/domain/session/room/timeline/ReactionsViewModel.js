@@ -190,7 +190,7 @@ import {HomeServer as MockHomeServer} from "../../../../mocks/HomeServer.js";
 import {BaseMessageTile} from "./tiles/BaseMessageTile.js";
 import {MappedList} from "../../../../observable/list/MappedList.js";
 import {ObservableValue} from "../../../../observable/ObservableValue.js";
-import {PowerLevels} from "../../../../matrix/room/timeline/PowerLevels.js";
+import {PowerLevels} from "../../../../matrix/room/PowerLevels.js";
 
 export function tests() {
     const fragmentIdComparer = new FragmentIdComparer([]);
@@ -222,7 +222,7 @@ export function tests() {
         };
         const tiles = new MappedList(timeline.entries, entry => {
             if (entry.eventType === "m.room.message") {
-                return new BaseMessageTile({entry, room, timeline, platform: {logger}});
+                return new BaseMessageTile({entry, roomVM: {room}, timeline, platform: {logger}});
             }
             return null;
         }, (tile, params, entry) => tile?.updateEntry(entry, params));

@@ -41,6 +41,10 @@ export class BaseMessageTile extends SimpleTile {
         return this._entry.sender;
     }
 
+    get memberPanelLink() {
+        return `${this.urlCreator.urlUntilSegment("room")}/member/${this.sender}`;
+    }
+
     // Avatar view model contract
     get avatarColorNumber() {
         return getIdentifierColorNumber(this._entry.sender);
@@ -104,6 +108,14 @@ export class BaseMessageTile extends SimpleTile {
             this._updateReactions();
         }
         return action;
+    }
+
+    startReply() {
+        this._roomVM.startReply(this._entry);
+    }
+
+    reply(msgtype, body, log = null) {
+        return this._room.sendEvent("m.room.message", this._entry.reply(msgtype, body), null, log);
     }
 
     redact(reason, log) {

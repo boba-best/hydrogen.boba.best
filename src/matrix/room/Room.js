@@ -23,6 +23,7 @@ import {WrappedError} from "../error.js"
 import {Heroes} from "./members/Heroes.js";
 import {AttachmentUpload} from "./AttachmentUpload.js";
 import {DecryptionSource} from "../e2ee/common.js";
+import {PowerLevels, EVENT_TYPE as POWERLEVELS_EVENT_TYPE } from "./PowerLevels.js";
 
 const EVENT_ENCRYPTED_TYPE = "m.room.encrypted";
 
@@ -173,6 +174,7 @@ export class Room extends BaseRoom {
         if (Array.isArray(roomResponse.timeline?.events)) {
             removedPendingEvents = await this._sendQueue.removeRemoteEchos(roomResponse.timeline.events, txn, log);
         }
+        const powerLevelsEvent = this._getPowerLevelsEvent(roomResponse);
         return {
             summaryChanges,
             roomEncryption,
@@ -182,6 +184,7 @@ export class Room extends BaseRoom {
             removedPendingEvents,
             memberChanges,
             heroChanges,
+            powerLevelsEvent,
             shouldFlushKeyShares,
         };
     }
@@ -194,7 +197,7 @@ export class Room extends BaseRoom {
     afterSync(changes, log) {
         const {
             summaryChanges, newEntries, updatedEntries, newLiveKey,
-            removedPendingEvents, memberChanges,
+            removedPendingEvents, memberChanges, powerLevelsEvent,
             heroChanges, roomEncryption
         } = changes;
         log.set("id", this.id);
@@ -208,6 +211,9 @@ export class Room extends BaseRoom {
             }
             if (this._memberList) {
                 this._memberList.afterSync(memberChanges);
+            }
+            if (this._observedMembers) {
+                this._updateObservedMembers(memberChanges);
             }
             if (this._timeline) {
                 for (const [userId, memberChange] of memberChanges.entries()) {
@@ -233,6 +239,9 @@ export class Room extends BaseRoom {
                 emitChange = true;
             }
         }
+        if (powerLevelsEvent) {
+            this._updatePowerLevels(powerLevelsEvent);
+        }
         if (emitChange) {
             this._emitUpdate();
         }
@@ -247,6 +256,32 @@ export class Room extends BaseRoom {
         }
         if (removedPendingEvents) {
             this._sendQueue.emitRemovals(removedPendingEvents);
+        }
+    }
+
+    _updateObservedMembers(memberChanges) {
+        for (const [userId, memberChange] of memberChanges) {
+            const observableMember = this._observedMembers.get(userId);
+            if (observableMember) {
+                observableMember.set(memberChange.member);
+            }
+        }
+    }
+
+    _getPowerLevelsEvent(roomResponse) {
+        const isPowerlevelEvent = event => event.state_key === "" && event.type === POWERLEVELS_EVENT_TYPE;
+        const powerLevelEvent = roomResponse.timeline?.events.find(isPowerlevelEvent) ?? roomResponse.state?.events.find(isPowerlevelEvent);
+        return powerLevelEvent;
+    }
+
+    _updatePowerLevels(powerLevelEvent) {
+        if (this._powerLevels) {
+            const newPowerLevels = new PowerLevels({
+                powerLevelEvent,
+                ownUserId: this._user.id,
+                membership: this.membership,
+            });
+            this._powerLevels.set(newPowerLevels);
         }
     }
 

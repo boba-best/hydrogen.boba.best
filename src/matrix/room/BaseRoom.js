@@ -21,14 +21,14 @@ import {RelationWriter} from "./timeline/persistence/RelationWriter.js";
 import {Timeline} from "./timeline/Timeline.js";
 import {FragmentIdComparer} from "./timeline/FragmentIdComparer.js";
 import {WrappedError} from "../error.js"
-import {fetchOrLoadMembers} from "./members/load.js";
+import {fetchOrLoadMembers, fetchOrLoadMember} from "./members/load.js";
 import {MemberList} from "./members/MemberList.js";
 import {Heroes} from "./members/Heroes.js";
 import {EventEntry} from "./timeline/entries/EventEntry.js";
 import {ObservedEventMap} from "./ObservedEventMap.js";
 import {DecryptionSource} from "../e2ee/common.js";
 import {ensureLogItem} from "../../logging/utils.js";
-import {PowerLevels} from "./timeline/PowerLevels.js";
+import {PowerLevels} from "./PowerLevels.js";
 import {RetainedObservableValue} from "../../observable/ObservableValue.js";
 
 const EVENT_ENCRYPTED_TYPE = "m.room.encrypted";
@@ -54,6 +54,7 @@ export class BaseRoom extends EventEmitter {
         this._observedEvents = null;
         this._powerLevels = null;
         this._powerLevelLoading = null;
+        this._observedMembers = null;
     }
 
     async _eventIdsToEntries(eventIds, txn) {
@@ -213,6 +214,32 @@ export class BaseRoom extends EventEmitter {
             throw new WrappedError(`Could not load room ${this._roomId}`, err);
         }
     }
+
+    async observeMember(userId) {
+        if (!this._observedMembers) {
+            this._observedMembers = new Map();
+        }
+        const mapMember = this._observedMembers.get(userId);
+        if (mapMember) {
+            // Hit, we're already observing this member
+            return mapMember;
+        }
+        // Miss, load from storage/hs and set in map
+        const member = await fetchOrLoadMember({
+            summary: this._summary,
+            roomId: this._roomId,
+            userId,
+            storage: this._storage,
+            hsApi: this._hsApi
+        }, this._platform.logger);
+        if (!member) {
+            return null;
+        }
+        const observableMember = new RetainedObservableValue(member, () => this._observedMembers.delete(userId));
+        this._observedMembers.set(userId, observableMember);
+        return observableMember;
+    }
+
 
     /** @public */
     async loadMemberList(log = null) {

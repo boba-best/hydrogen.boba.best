@@ -17,12 +17,15 @@ limitations under the License.
 import {TemplateView} from "../../general/TemplateView.js";
 import {Popup} from "../../general/Popup.js";
 import {Menu} from "../../general/Menu.js";
+import {TextMessageView} from "./timeline/TextMessageView.js";
+import {viewClassForEntry} from "./TimelineList.js"
 
 export class MessageComposer extends TemplateView {
     constructor(viewModel) {
         super(viewModel);
         this._input = null;
         this._attachmentPopup = null;
+        this._focusInput = null;
     }
 
     render(t, vm) {
@@ -32,7 +35,23 @@ export class MessageComposer extends TemplateView {
             onKeydown: e => this._onKeyDown(e),
             onInput: () => vm.setInput(this._input.value),
         });
-        return t.div({className: "MessageComposer"}, [
+        this._focusInput = () => this._input.focus();
+        this.value.on("focus", this._focusInput);
+        const replyPreview = t.map(vm => vm.replyViewModel, (rvm, t) => {
+            const View = rvm && viewClassForEntry(rvm);
+            if (!View) { return null; }
+            return t.div({
+                    className: "MessageComposer_replyPreview"
+                }, [
+                    t.span({ className: "replying" }, "Replying"),
+                    t.button({
+                        className: "cancel",
+                        onClick: () => this._clearReplyingTo()
+                    }, "Close"),
+                    t.view(new View(rvm, false, "div"))
+                ])
+        });
+        const input = t.div({className: "MessageComposer_input"}, [
             this._input,
             t.button({
                 className: "sendFile",
@@ -46,11 +65,23 @@ export class MessageComposer extends TemplateView {
                 onClick: () => this._trySend(),
             }, vm.i18n`Send`),
         ]);
+        return t.div({ className: "MessageComposer" }, [replyPreview, input]);
     }
 
-    _trySend() {
+    unmount() {
+        if (this._focusInput) {
+            this.value.off("focus", this._focusInput);
+        }
+        super.unmount();
+    }
+
+    _clearReplyingTo() {
+        this.value.clearReplyingTo();
+    }
+
+    async _trySend() {
         this._input.focus();
-        if (this.value.sendMessage(this._input.value)) {
+        if (await this.value.sendMessage(this._input.value)) {
             this._input.value = "";
         }
     }
