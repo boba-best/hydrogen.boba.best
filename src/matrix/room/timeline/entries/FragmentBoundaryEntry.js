@@ -15,9 +15,9 @@ limitations under the License.
 */
 
 import {BaseEntry} from "./BaseEntry";
-import {Direction} from "../Direction.js";
+import {Direction} from "../Direction";
 import {isValidFragmentId} from "../common.js";
-import {KeyLimits} from "../../../storage/common.js";
+import {KeyLimits} from "../../../storage/common";
 
 export class FragmentBoundaryEntry extends BaseEntry {
     constructor(fragment, isFragmentStart, fragmentIdComparer) {

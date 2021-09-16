@@ -17,7 +17,7 @@ limitations under the License.
 
 import {SortedArray, AsyncMappedList, ConcatList, ObservableArray} from "../../../observable/index.js";
 import {Disposables} from "../../../utils/Disposables.js";
-import {Direction} from "./Direction.js";
+import {Direction} from "./Direction";
 import {TimelineReader} from "./persistence/TimelineReader.js";
 import {PendingEventEntry} from "./entries/PendingEventEntry.js";
 import {RoomMember} from "../members/RoomMember.js";
@@ -72,8 +72,10 @@ export class Timeline {
         // as they should only populate once the view subscribes to it
         // if they are populated already, the sender profile would be empty
 
-        // 30 seems to be a good amount to fill the entire screen
-        const readerRequest = this._disposables.track(this._timelineReader.readFromEnd(30, txn, log));
+        // choose good amount here between showing messages initially and
+        // not spending too much time decrypting messages before showing the timeline.
+        // more messages should be loaded automatically until the viewport is full by the view if needed.
+        const readerRequest = this._disposables.track(this._timelineReader.readFromEnd(20, txn, log));
         try {
             const entries = await readerRequest.complete();
             this._setupEntries(entries);
