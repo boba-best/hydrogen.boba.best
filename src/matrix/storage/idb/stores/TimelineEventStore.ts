@@ -44,6 +44,11 @@ function encodeKey(roomId: string, fragmentId: number, eventIndex: number): stri
     return `${roomId}|${encodeUint32(fragmentId)}|${encodeUint32(eventIndex)}`;
 }
 
+function decodeKey(key: string): { roomId: string, eventKey: EventKey } {
+    const [roomId, fragmentId, eventIndex] = key.split("|");
+    return {roomId, eventKey: new EventKey(parseInt(fragmentId, 10), parseInt(eventIndex, 10))};
+}
+
 function encodeEventIdKey(roomId: string, eventId: string): string {
     return `${roomId}|${eventId}`;
 }
@@ -220,6 +225,19 @@ export class TimelineEventStore {
         return events;
     }
 
+    async getEventKeysForIds(roomId: string, eventIds: string[]): Promise<Map<string, EventKey>> {
+        const byEventId = this._timelineStore.index("byEventId");
+        const keys = eventIds.map(eventId => encodeEventIdKey(roomId, eventId));
+        const results = new Map();
+        await byEventId.findExistingKeys(keys, false, (indexKey, pk) => {
+            const {eventId} = decodeEventIdKey(indexKey as string);
+            const {eventKey} = decodeKey(pk as string);
+            results.set(eventId, eventKey);
+            return false;
+        });
+        return results;
+    }
+
     /** Finds the first eventId that occurs in the store, if any.
      *  For optimal performance, `eventIds` should be in chronological order.
      *
@@ -261,15 +279,17 @@ export class TimelineEventStore {
         return firstFoundKey && decodeEventIdKey(firstFoundKey).eventId;
     }
 
-    /** Inserts a new entry into the store. The combination of roomId and eventKey should not exist yet, or an error is thrown.
-     *  @param entry the entry to insert
-     *  @return nothing. To wait for the operation to finish, await the transaction it's part of.
-     *  @throws {StorageError} ...
+    /** Inserts a new entry into the store.
+     * 
+     * If the event already exists in the store (either the eventKey or the event id
+     * are already known for the given roomId), this operation has no effect.
+     * 
+     * Returns if the event was not yet known and the entry was written.
      */
-    insert(entry: TimelineEventEntry, log: LogItem): void {
+    tryInsert(entry: TimelineEventEntry, log: LogItem): Promise<boolean> {
         (entry as TimelineEventStorageEntry).key = encodeKey(entry.roomId, entry.fragmentId, entry.eventIndex);
         (entry as TimelineEventStorageEntry).eventIdKey = encodeEventIdKey(entry.roomId, entry.event.event_id);
-        this._timelineStore.add(entry as TimelineEventStorageEntry, log);
+        return this._timelineStore.tryAdd(entry as TimelineEventStorageEntry, log);
     }
 
     /** Updates the entry into the store with the given [roomId, eventKey] combination.

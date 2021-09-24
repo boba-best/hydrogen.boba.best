@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 import {iterateCursor, DONE, NOT_DONE, reqAsPromise} from "./utils";
+import {Transaction} from "./Transaction";
 
 type Reducer<A,B> = (acc: B, val: A) => B
 
@@ -31,9 +32,19 @@ interface QueryTargetInterface<T> {
 
 export class QueryTarget<T> {
     protected _target: QueryTargetInterface<T>;
+    protected _transaction: Transaction;
 
-    constructor(target: QueryTargetInterface<T>) {
+    constructor(target: QueryTargetInterface<T>, transaction: Transaction) {
         this._target = target;
+        this._transaction = transaction;
+    }
+
+    get idbFactory(): IDBFactory {
+        return this._transaction.idbFactory;
+    }
+
+    get IDBKeyRange(): typeof IDBKeyRange {
+        return this._transaction.IDBKeyRange;
     }
 
     _openCursor(range?: IDBQuery, direction?: IDBCursorDirection): IDBRequest<IDBCursorWithValue | null> {
@@ -153,37 +164,17 @@ export class QueryTarget<T> {
      * If the callback returns true, the search is halted and callback won't be called again.
      * `callback` is called with the same instances of the key as given in `keys`, so direct comparison can be used.
      */
-    async findExistingKeys(keys: IDBValidKey[], backwards: boolean, callback: (key: IDBValidKey, found: boolean) => boolean): Promise<void> {
+    async findExistingKeys(keys: IDBValidKey[], backwards: boolean, callback: (key: IDBValidKey, pk: IDBValidKey) => boolean): Promise<void> {
         const direction = backwards ? "prev" : "next";
-        const compareKeys = (a, b) => backwards ? -indexedDB.cmp(a, b) : indexedDB.cmp(a, b);
-        const sortedKeys = keys.slice().sort(compareKeys);
+        const sortedKeys = keys.slice().sort((a, b) => backwards ? -this.idbFactory.cmp(a, b) : this.idbFactory.cmp(a, b));
         const firstKey = backwards ? sortedKeys[sortedKeys.length - 1] : sortedKeys[0];
         const lastKey = backwards ? sortedKeys[0] : sortedKeys[sortedKeys.length - 1];
-        const cursor = this._target.openKeyCursor(IDBKeyRange.bound(firstKey, lastKey), direction);
-        let i = 0;
-        let consumerDone = false;
-        await iterateCursor(cursor, (value, key) => {
-            // while key is larger than next key, advance and report false
-            while(i < sortedKeys.length && compareKeys(sortedKeys[i], key) < 0 && !consumerDone) {
-                consumerDone = callback(sortedKeys[i], false);
-                ++i;
-            }
-            if (i < sortedKeys.length && compareKeys(sortedKeys[i], key) === 0 && !consumerDone) {
-                consumerDone = callback(sortedKeys[i], true);
-                ++i;
-            }
-            const done = consumerDone || i >= sortedKeys.length;
-            let jumpTo;
-            if (!done) {
-                jumpTo = sortedKeys[i];
-            }
-            return {done, jumpTo};
+        const cursor = this._target.openKeyCursor(this.IDBKeyRange.bound(firstKey, lastKey), direction);
+        await iterateCursor(cursor, (value, key, cursor) => {
+            const pk = cursor.primaryKey;
+            const done = callback(key, pk);
+            return done ? DONE : NOT_DONE;
         });
-        // report null for keys we didn't to at the end
-        while (!consumerDone && i < sortedKeys.length) {
-            consumerDone = callback(sortedKeys[i], false);
-            ++i;
-        }
     }
 
     _reduce<B>(range: IDBQuery, reducer: (reduced: B, value: T) => B, initialValue: B, direction: IDBCursorDirection): Promise<boolean> {

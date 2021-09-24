@@ -66,7 +66,7 @@ export class BaseMessageView extends TemplateView {
         let reactionsView = null;
         t.mapSideEffect(vm => vm.reactions, reactions => {
             if (reactions && this._interactive && !reactionsView) {
-                reactionsView = new ReactionsView(vm.reactions);
+                reactionsView = new ReactionsView(reactions);
                 this.addSubView(reactionsView);
                 li.appendChild(mountView(reactionsView));
             } else if (!reactions && reactionsView) {
@@ -98,18 +98,7 @@ export class BaseMessageView extends TemplateView {
             const onClose = () => this.root().classList.remove("menuOpen");
             this._menuPopup = new Popup(new Menu(options), onClose);
             this._menuPopup.trackInTemplateView(this);
-            this._menuPopup.showRelativeTo(button, {
-                horizontal: {
-                    relativeTo: "end",
-                    align: "start",
-                    after: 0
-                },
-                vertical: {
-                    relativeTo: "start",
-                    align: "end",
-                    before: -24
-                }
-            });
+            this._menuPopup.showRelativeTo(button, 2);
         }
     }
 

@@ -26,61 +26,22 @@ export class GapWriter {
         this._fragmentIdComparer = fragmentIdComparer;
         this._relationWriter = relationWriter;
     }
-    // events is in reverse-chronological order (last event comes at index 0) if backwards
-    async _findOverlappingEvents(fragmentEntry, events, txn, log) {
-        let expectedOverlappingEventId;
-        if (fragmentEntry.hasLinkedFragment) {
-            expectedOverlappingEventId = await this._findExpectedOverlappingEventId(fragmentEntry, txn);
-        }
-        let remainingEvents = events;
-        let nonOverlappingEvents = [];
+
+    async _findOverlappingEvents(fragmentEntry, events, txn) {
+        const eventIds = events.map(e => e.event_id);
+        const existingEventKeyMap = await txn.timelineEvents.getEventKeysForIds(this._roomId, eventIds);
+        const nonOverlappingEvents = events.filter(e => !existingEventKeyMap.has(e.event_id));
         let neighbourFragmentEntry;
-        while (remainingEvents && remainingEvents.length) {
-            const eventIds = remainingEvents.map(e => e.event_id);
-            const duplicateEventId = await txn.timelineEvents.findFirstOccurringEventId(this._roomId, eventIds);
-            if (duplicateEventId) {
-                const duplicateEventIndex = remainingEvents.findIndex(e => e.event_id === duplicateEventId);
-                // should never happen, just being defensive as this *can't* go wrong
-                if (duplicateEventIndex === -1) {
-                    throw new Error(`findFirstOccurringEventId returned ${duplicateEventIndex} which wasn't ` +
-                        `in [${eventIds.join(",")}] in ${this._roomId}`);
+        if (fragmentEntry.hasLinkedFragment) {
+            for (const eventKey of existingEventKeyMap.values()) {
+                if (eventKey.fragmentId === fragmentEntry.linkedFragmentId) {
+                    const neighbourFragment = await txn.timelineFragments.get(this._roomId, fragmentEntry.linkedFragmentId);
+                    neighbourFragmentEntry = fragmentEntry.createNeighbourEntry(neighbourFragment);
+                    break;
                 }
-                nonOverlappingEvents.push(...remainingEvents.slice(0, duplicateEventIndex));
-                if (!expectedOverlappingEventId || duplicateEventId === expectedOverlappingEventId) {
-                    // TODO: check here that the neighbourEvent is at the correct edge of it's fragment
-                    // get neighbour fragment to link it up later on
-                    const neighbourEvent = await txn.timelineEvents.getByEventId(this._roomId, duplicateEventId);
-                    if (neighbourEvent.fragmentId === fragmentEntry.fragmentId) {
-                        log.log("hit #160, prevent fragment linking to itself", log.level.Warn);
-                    } else {
-                        const neighbourFragment = await txn.timelineFragments.get(this._roomId, neighbourEvent.fragmentId);
-                        neighbourFragmentEntry = fragmentEntry.createNeighbourEntry(neighbourFragment);
-                    }
-                    // trim overlapping events
-                    remainingEvents = null;
-                } else {
-                    // we've hit https://github.com/matrix-org/synapse/issues/7164, 
-                    // e.g. the event id we found is already in our store but it is not
-                    // the adjacent fragment id. Ignore the event, but keep processing the ones after.
-                    remainingEvents = remainingEvents.slice(duplicateEventIndex + 1);
-                }
-            } else {
-                nonOverlappingEvents.push(...remainingEvents);
-                remainingEvents = null;
             }
         }
         return {nonOverlappingEvents, neighbourFragmentEntry};
-    }
-
-    async _findExpectedOverlappingEventId(fragmentEntry, txn) {
-        const eventEntry = await this._findFragmentEdgeEvent(
-            fragmentEntry.linkedFragmentId,
-            // reverse because it's the oppose edge of the linked fragment
-            fragmentEntry.direction.reverse(),
-            txn);
-        if (eventEntry) {
-            return eventEntry.event.event_id;
-        }
     }
 
     async _findFragmentEdgeEventKey(fragmentEntry, txn) {
@@ -124,9 +85,10 @@ export class GapWriter {
             if (updatedRelationTargetEntries) {
                 updatedEntries.push(...updatedRelationTargetEntries);
             }
-            txn.timelineEvents.insert(eventStorageEntry);
-            const eventEntry = new EventEntry(eventStorageEntry, this._fragmentIdComparer);
-            directionalAppend(entries, eventEntry, direction);
+            if (await txn.timelineEvents.tryInsert(eventStorageEntry, log)) {
+                const eventEntry = new EventEntry(eventStorageEntry, this._fragmentIdComparer);
+                directionalAppend(entries, eventEntry, direction);
+            }
         }
         return {entries, updatedEntries};
     }
@@ -161,30 +123,15 @@ export class GapWriter {
         }
     }
 
-    async _updateFragments(fragmentEntry, neighbourFragmentEntry, end, entries, txn) {
+    async _updateFragments(fragmentEntry, neighbourFragmentEntry, end, entries, txn, log) {
         const {direction} = fragmentEntry;
         const changedFragments = [];
         directionalAppend(entries, fragmentEntry, direction);
         // set `end` as token, and if we found an event in the step before, link up the fragments in the fragment entry
         if (neighbourFragmentEntry) {
-            // the throws here should never happen and are only here to detect client or unhandled server bugs
-            // and a last measure to prevent corrupting fragment links
-            if (!fragmentEntry.hasLinkedFragment) {
-                fragmentEntry.linkedFragmentId = neighbourFragmentEntry.fragmentId;
-            } else if (fragmentEntry.linkedFragmentId !== neighbourFragmentEntry.fragmentId) {
-                throw new Error(`Prevented changing fragment ${fragmentEntry.fragmentId} ` +
-                    `${fragmentEntry.direction.asApiString()} link from ${fragmentEntry.linkedFragmentId} ` +
-                    `to ${neighbourFragmentEntry.fragmentId} in ${this._roomId}`);
-            }
-            if (!neighbourFragmentEntry.hasLinkedFragment) {
-                neighbourFragmentEntry.linkedFragmentId = fragmentEntry.fragmentId;
-            } else if (neighbourFragmentEntry.linkedFragmentId !== fragmentEntry.fragmentId) {
-                throw new Error(`Prevented changing fragment ${neighbourFragmentEntry.fragmentId} ` +
-                    `${neighbourFragmentEntry.direction.asApiString()} link from ${neighbourFragmentEntry.linkedFragmentId} ` +
-                    `to ${fragmentEntry.fragmentId} in ${this._roomId}`);
-            }
             // if neighbourFragmentEntry was found, it means the events were overlapping,
             // so no pagination should happen anymore.
+            log.set("closedGapWith", neighbourFragmentEntry.fragmentId);
             neighbourFragmentEntry.token = null;
             fragmentEntry.token = null;
 
@@ -240,15 +187,184 @@ export class GapWriter {
         const {
             nonOverlappingEvents,
             neighbourFragmentEntry
-        } = await this._findOverlappingEvents(fragmentEntry, chunk, txn, log);
-        if (!neighbourFragmentEntry && nonOverlappingEvents.length === 0 && typeof end === "string") {
-            log.log("hit #160, clearing token", log.level.Warn);
-            end = null;
-        }
+        } = await this._findOverlappingEvents(fragmentEntry, chunk, txn);
         // create entries for all events in chunk, add them to entries
         const {entries, updatedEntries} = await this._storeEvents(nonOverlappingEvents, lastKey, direction, state, txn, log);
-        const fragments = await this._updateFragments(fragmentEntry, neighbourFragmentEntry, end, entries, txn);
+        const fragments = await this._updateFragments(fragmentEntry, neighbourFragmentEntry, end, entries, txn, log);
     
         return {entries, updatedEntries, fragments};
+    }
+}
+
+import {FragmentIdComparer} from "../FragmentIdComparer.js";
+import {RelationWriter} from "./RelationWriter.js";
+import {createMockStorage} from "../../../../mocks/Storage.js";
+import {FragmentBoundaryEntry} from "../entries/FragmentBoundaryEntry.js";
+import {NullLogItem} from "../../../../logging/NullLogger.js";
+import {TimelineMock, eventIds, eventId} from "../../../../mocks/TimelineMock.ts";
+import {SyncWriter} from "./SyncWriter.js";
+import {MemberWriter} from "./MemberWriter.js";
+import {KeyLimits} from "../../../storage/common";
+
+export function tests() {
+    const roomId = "!room:hs.tdl";
+    const alice = "alice@hs.tdl";
+    const logger = new NullLogItem();
+
+    async function createGapFillTxn(storage) {
+        return storage.readWriteTxn([
+            storage.storeNames.roomMembers,
+            storage.storeNames.pendingEvents,
+            storage.storeNames.timelineEvents,
+            storage.storeNames.timelineRelations,
+            storage.storeNames.timelineFragments,
+        ]);
+    }
+
+    async function setup() {
+        const storage = await createMockStorage();
+        const txn = await createGapFillTxn(storage);
+        const fragmentIdComparer = new FragmentIdComparer([]);
+        const relationWriter = new RelationWriter({
+            roomId, fragmentIdComparer, ownUserId: alice,
+        });
+        const gapWriter = new GapWriter({
+            roomId, storage, fragmentIdComparer, relationWriter
+        });
+        const memberWriter = new MemberWriter(roomId);
+        const syncWriter = new SyncWriter({
+            roomId,
+            fragmentIdComparer,
+            memberWriter,
+            relationWriter
+        });
+        return { storage, txn, fragmentIdComparer, gapWriter, syncWriter, timelineMock: new TimelineMock() };
+    }
+
+    async function syncAndWrite(mocks, { previous, limit } = {}) {
+        const {txn, timelineMock, syncWriter, fragmentIdComparer} = mocks;
+        const syncResponse = timelineMock.sync(previous?.next_batch, limit);
+        const {newLiveKey} = await syncWriter.writeSync(syncResponse, false, false, txn, logger);
+        syncWriter.afterSync(newLiveKey);
+        return {
+            syncResponse,
+            fragmentEntry: newLiveKey ? FragmentBoundaryEntry.start(
+                await txn.timelineFragments.get(roomId, newLiveKey.fragmentId),
+                fragmentIdComparer,
+            ) : null,
+        };
+    }
+
+    async function backfillAndWrite(mocks, fragmentEntry, limit) {
+        const {txn, timelineMock, gapWriter} = mocks;
+        const messageResponse = timelineMock.messages(fragmentEntry.token, undefined, fragmentEntry.direction.asApiString(), limit);
+        await gapWriter.writeFragmentFill(fragmentEntry, messageResponse, txn, logger);
+    }
+
+    async function allFragmentEvents(mocks, fragmentId) {
+        const {txn} = mocks;
+        const entries = await txn.timelineEvents.eventsAfter(roomId, new EventKey(fragmentId, KeyLimits.minStorageKey));
+        return entries.map(e => e.event);
+    }
+
+    async function fetchFragment(mocks, fragmentId) {
+        const {txn} = mocks;
+        return txn.timelineFragments.get(roomId, fragmentId);
+    }
+
+    function assertFilledLink(assert, fragment1, fragment2) {
+        assert.equal(fragment1.nextId, fragment2.id);
+        assert.equal(fragment2.previousId, fragment1.id);
+        assert.equal(fragment1.nextToken, null);
+        assert.equal(fragment2.previousToken, null);
+    }
+
+    function assertGapLink(assert, fragment1, fragment2) {
+        assert.equal(fragment1.nextId, fragment2.id);
+        assert.equal(fragment2.previousId, fragment1.id);
+        assert.notEqual(fragment2.previousToken, null);
+    }
+
+    return {
+        "Backfilling after one sync": async assert => {
+            const mocks = await setup();
+            const { timelineMock } = mocks;
+            timelineMock.append(30);
+            const {fragmentEntry} = await syncAndWrite(mocks);
+            await backfillAndWrite(mocks, fragmentEntry, 10);
+            const events = await allFragmentEvents(mocks, fragmentEntry.fragmentId);
+            assert.deepEqual(events.map(e => e.event_id), eventIds(10, 30));
+            await mocks.txn.complete();
+        },
+        "Backfilling a fragment that is expected to close a gap, and does": async assert => {
+            const mocks = await setup();
+            const { timelineMock } = mocks;
+            timelineMock.append(10);
+            const {syncResponse, fragmentEntry: firstFragmentEntry} = await syncAndWrite(mocks, { limit: 10 });
+            timelineMock.append(15);
+            const {fragmentEntry: secondFragmentEntry} = await syncAndWrite(mocks, { previous: syncResponse, limit: 10 });
+            await backfillAndWrite(mocks, secondFragmentEntry, 10);
+
+            const firstFragment = await fetchFragment(mocks, firstFragmentEntry.fragmentId);
+            const secondFragment = await fetchFragment(mocks, secondFragmentEntry.fragmentId);
+            assertFilledLink(assert, firstFragment, secondFragment)
+            const firstEvents = await allFragmentEvents(mocks, firstFragmentEntry.fragmentId);
+            assert.deepEqual(firstEvents.map(e => e.event_id), eventIds(0, 10));
+            const secondEvents = await allFragmentEvents(mocks, secondFragmentEntry.fragmentId);
+            assert.deepEqual(secondEvents.map(e => e.event_id), eventIds(10, 25));
+            await mocks.txn.complete();
+        },
+        "Backfilling a fragment that is expected to close a gap, but doesn't yet": async assert => {
+            const mocks = await setup();
+            const { timelineMock } = mocks;
+            timelineMock.append(10);
+            const {syncResponse, fragmentEntry: firstFragmentEntry} = await syncAndWrite(mocks, { limit: 10 });
+            timelineMock.append(20);
+            const {fragmentEntry: secondFragmentEntry} = await syncAndWrite(mocks, { previous: syncResponse, limit: 10 });
+            await backfillAndWrite(mocks, secondFragmentEntry, 10);
+
+            const firstFragment = await fetchFragment(mocks, firstFragmentEntry.fragmentId);
+            const secondFragment = await fetchFragment(mocks, secondFragmentEntry.fragmentId);
+            assertGapLink(assert, firstFragment, secondFragment)
+            const firstEvents = await allFragmentEvents(mocks, firstFragmentEntry.fragmentId);
+            assert.deepEqual(firstEvents.map(e => e.event_id), eventIds(0, 10));
+            const secondEvents = await allFragmentEvents(mocks, secondFragmentEntry.fragmentId);
+            assert.deepEqual(secondEvents.map(e => e.event_id), eventIds(10, 30));
+            await mocks.txn.complete();
+        },
+        "Receiving a sync with the same events as the current fragment does not create infinite link": async assert => {
+            const mocks = await setup();
+            const { txn, timelineMock } = mocks;
+            timelineMock.append(10);
+            const {syncResponse, fragmentEntry: fragmentEntry} = await syncAndWrite(mocks, { limit: 10 });
+            // Mess with the saved token to receive old events in backfill
+            fragmentEntry.token = syncResponse.next_batch;
+            txn.timelineFragments.update(fragmentEntry.fragment);
+            await backfillAndWrite(mocks, fragmentEntry, 10);
+
+            const fragment = await fetchFragment(mocks, fragmentEntry.fragmentId);
+            assert.notEqual(fragment.nextId, fragment.id);
+            assert.notEqual(fragment.previousId, fragment.id);
+            await mocks.txn.complete();
+        },
+        "An event received by sync does not interrupt backfilling": async assert => {
+            const mocks = await setup();
+            const { timelineMock } = mocks;
+            timelineMock.append(10);
+            const {syncResponse, fragmentEntry: firstFragmentEntry} = await syncAndWrite(mocks, { limit: 10 });
+            timelineMock.append(11);
+            const {fragmentEntry: secondFragmentEntry} = await syncAndWrite(mocks, { previous: syncResponse, limit: 10 });
+            timelineMock.insertAfter(eventId(9), 5);
+            await backfillAndWrite(mocks, secondFragmentEntry, 10);
+
+            const firstEvents = await allFragmentEvents(mocks, firstFragmentEntry.fragmentId);
+            assert.deepEqual(firstEvents.map(e => e.event_id), eventIds(0, 10));
+            const secondEvents = await allFragmentEvents(mocks, secondFragmentEntry.fragmentId);
+            assert.deepEqual(secondEvents.map(e => e.event_id), [...eventIds(21,26), ...eventIds(10, 21)]);
+            const firstFragment = await fetchFragment(mocks, firstFragmentEntry.fragmentId);
+            const secondFragment = await fetchFragment(mocks, secondFragmentEntry.fragmentId);
+            assertFilledLink(assert, firstFragment, secondFragment)
+            await mocks.txn.complete();
+        }
     }
 }

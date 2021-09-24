@@ -17,6 +17,7 @@ limitations under the License.
 .Timeline {
     display: flex;
     flex-direction: column;
+    /* needed to position the jump to bottom button */
     position: relative;
     min-height: 0;
 }
@@ -44,26 +45,6 @@ limitations under the License.
     content when there are not yet enough tiles to fill the viewport */
     padding: 1px 0;
     margin: 0;
-}
-
-.message-container {
-    flex: 0 1 auto;
-    /* first try break-all, then break-word, which isn't supported everywhere */
-    word-break: break-all;  
-    word-break: break-word;
-}
-
-.message-container .sender {
-    margin: 5px 0;
-}
-
-.message-container .media {
-    display: block;
-}
-
-.message-container .media > img,
-.message-container .media > video {
-    display: block;
 }
 
 .AnnouncementView {
