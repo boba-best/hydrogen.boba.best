@@ -14,10 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import {FDBFactory, FDBKeyRange} from "../../lib/fake-indexeddb/index.js";
-import {StorageFactory} from "../matrix/storage/idb/StorageFactory";
-import {Instance as nullLogger} from "../logging/NullLogger.js";
-
-export function createMockStorage() {
-    return new StorageFactory(null, new FDBFactory(), FDBKeyRange).create(1, nullLogger.item);
+export interface IDOMStorage {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+    key(n: number): string | null;
+    readonly length: number;
 }
