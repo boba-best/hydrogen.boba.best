@@ -28,14 +28,8 @@ You can only verify by comparing keys manually currently. In Element, go to your
 
 ## I want to host my own Hydrogen, how do I do that?
 
-There are no published builds at this point. You need to checkout the version you want to build, or master if you want to run bleeding edge, and run `yarn install` and then `yarn build` in a console (and install nodejs > 14 and yarn if you haven't yet). Now you should find all the files needed to host Hydrogen in the `target/` folder, just copy them all over to your server. As always, don't host your client on the same [origin](https://web.dev/same-origin-policy/#what's-considered-same-origin) as your homeserver.
+Published builds can be found at https://github.com/vector-im/hydrogen-web/releases. For building your own, you need to checkout the version you want to build, or master if you want to run bleeding edge, and run `yarn install` and then `yarn build` in a console (and install nodejs > 14 and yarn if you haven't yet). Now you should find all the files needed to host Hydrogen in the `target/` folder, just copy them all over to your server. As always, don't host your client on the same [origin](https://web.dev/same-origin-policy/#what's-considered-same-origin) as your homeserver.
 
 ## I want to embed Hydrogen in my website, how should I do that?
 
-There are no npm modules yet published for Hydrogen. The easiest is probably to setup your website project, do yarn/npm init if you haven't yet, then add the hydrogen repo as a git http dependency, and import the files/classes you want to use from Hydrogen.
-
-For example, for a single room chat, you could create an instance of `Platform`, you create a new `SessionContainer` with it, call `startWithLogin` on it, observe `sessionContainer.loadStatus` to know when initial sync is done, then do `sessionContainer.session.rooms.get('roomid')` and you create a `RoomViewModel` with it and pass that to a `RoomView`. Then you call `document.appendChild(roomView.mount())` and you should see a syncing room.
-
-Feel free to ask for pointers in #hydrogen:matrix.org as the documentation is still lacking considerably. Note that at this early, pre 1.0 stage of the project, there is no promise of API stability yet.
-
-Also, to make end-to-end encryption work, you'll likely need some tweaks to your build system, see [this issue](https://github.com/vector-im/hydrogen-web/issues/467).
+Hydrogen aims to be usable as an SDK, and while it is still early days, you can find some documentation how to do that in [SDK.md](SDK.md).

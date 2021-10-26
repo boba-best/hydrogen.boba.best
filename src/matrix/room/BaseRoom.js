@@ -29,7 +29,7 @@ import {ObservedEventMap} from "./ObservedEventMap.js";
 import {DecryptionSource} from "../e2ee/common.js";
 import {ensureLogItem} from "../../logging/utils.js";
 import {PowerLevels} from "./PowerLevels.js";
-import {RetainedObservableValue} from "../../observable/ObservableValue.js";
+import {RetainedObservableValue} from "../../observable/ObservableValue";
 
 const EVENT_ENCRYPTED_TYPE = "m.room.encrypted";
 
@@ -208,7 +208,7 @@ export class BaseRoom extends EventEmitter {
             if (this._summary.data.needsHeroes) {
                 this._heroes = new Heroes(this._roomId);
                 const changes = await this._heroes.calculateChanges(this._summary.data.heroes, [], txn);
-                this._heroes.applyChanges(changes, this._summary.data);
+                this._heroes.applyChanges(changes, this._summary.data, log);
             }
         } catch (err) {
             throw new WrappedError(`Could not load room ${this._roomId}`, err);

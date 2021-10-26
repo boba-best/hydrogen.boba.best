@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import {ObservableValue} from "../observable/ObservableValue.js";
+import {ObservableValue} from "../observable/ObservableValue";
 import {createEnum} from "../utils/enum.js";
 
 const INCREMENTAL_TIMEOUT = 30000;
@@ -464,7 +464,6 @@ class SessionSyncProcessState {
 
     dispose() {
         this.lock?.release();
-        this.preparation?.dispose();
     }
 }
 

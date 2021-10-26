@@ -26,21 +26,22 @@ import {DeviceMessageHandler} from "./DeviceMessageHandler.js";
 import {Account as E2EEAccount} from "./e2ee/Account.js";
 import {Decryption as OlmDecryption} from "./e2ee/olm/Decryption.js";
 import {Encryption as OlmEncryption} from "./e2ee/olm/Encryption.js";
-import {Decryption as MegOlmDecryption} from "./e2ee/megolm/Decryption.js";
+import {Decryption as MegOlmDecryption} from "./e2ee/megolm/Decryption";
+import {KeyLoader as MegOlmKeyLoader} from "./e2ee/megolm/decryption/KeyLoader";
 import {SessionBackup} from "./e2ee/megolm/SessionBackup.js";
 import {Encryption as MegOlmEncryption} from "./e2ee/megolm/Encryption.js";
 import {MEGOLM_ALGORITHM} from "./e2ee/common.js";
 import {RoomEncryption} from "./e2ee/RoomEncryption.js";
 import {DeviceTracker} from "./e2ee/DeviceTracker.js";
 import {LockMap} from "../utils/LockMap.js";
-import {groupBy} from "../utils/groupBy.js";
+import {groupBy} from "../utils/groupBy";
 import {
     keyFromCredential as ssssKeyFromCredential,
     readKey as ssssReadKey,
     writeKey as ssssWriteKey,
 } from "./ssss/index.js";
 import {SecretStorage} from "./ssss/SecretStorage.js";
-import {ObservableValue, RetainedObservableValue} from "../observable/ObservableValue.js";
+import {ObservableValue, RetainedObservableValue} from "../observable/ObservableValue";
 
 const PICKLE_KEY = "DEFAULT_KEY";
 const PUSHER_KEY = "pusher";
@@ -105,6 +106,11 @@ export class Session {
         return this._sessionInfo.userId;
     }
 
+    async logout(log = undefined) {
+        const response = await this._hsApi.logout({log}).response();
+        console.log("logout", response);
+    }
+
     // called once this._e2eeAccount is assigned
     _setupEncryption() {
         // TODO: this should all go in a wrapper in e2ee/ that is bootstrapped by passing in the account
@@ -137,11 +143,8 @@ export class Session {
             now: this._platform.clock.now,
             ownDeviceId: this._sessionInfo.deviceId,
         });
-        this._megolmDecryption = new MegOlmDecryption({
-            pickleKey: PICKLE_KEY,
-            olm: this._olm,
-            olmWorker: this._olmWorker,
-        });
+        const keyLoader = new MegOlmKeyLoader(this._olm, PICKLE_KEY, 20);
+        this._megolmDecryption = new MegOlmDecryption(keyLoader, this._olmWorker);
         this._deviceMessageHandler.enableEncryption({olmDecryption, megolmDecryption: this._megolmDecryption});
     }
 
@@ -319,6 +322,7 @@ export class Session {
     dispose() {
         this._olmWorker?.dispose();
         this._sessionBackup?.dispose();
+        this._megolmDecryption.dispose();
         for (const room of this._rooms.values()) {
             room.dispose();
         }
