@@ -19,7 +19,7 @@ import {Room} from "./room/Room.js";
 import {ArchivedRoom} from "./room/ArchivedRoom.js";
 import {RoomStatus} from "./room/RoomStatus.js";
 import {Invite} from "./room/Invite.js";
-import {Pusher} from "./push/Pusher.js";
+import {Pusher} from "./push/Pusher";
 import { ObservableMap } from "../observable/index.js";
 import {User} from "./User.js";
 import {DeviceMessageHandler} from "./DeviceMessageHandler.js";
@@ -34,7 +34,7 @@ import {Encryption as MegOlmEncryption} from "./e2ee/megolm/Encryption.js";
 import {MEGOLM_ALGORITHM} from "./e2ee/common.js";
 import {RoomEncryption} from "./e2ee/RoomEncryption.js";
 import {DeviceTracker} from "./e2ee/DeviceTracker.js";
-import {LockMap} from "../utils/LockMap.js";
+import {LockMap} from "../utils/LockMap";
 import {groupBy} from "../utils/groupBy";
 import {
     keyFromCredential as ssssKeyFromCredential,
@@ -42,8 +42,8 @@ import {
     writeKey as ssssWriteKey,
     removeKey as ssssRemoveKey,
     keyFromDehydratedDeviceKey as createSSSSKeyFromDehydratedDeviceKey
-} from "./ssss/index.js";
-import {SecretStorage} from "./ssss/SecretStorage.js";
+} from "./ssss/index";
+import {SecretStorage} from "./ssss/SecretStorage";
 import {ObservableValue, RetainedObservableValue} from "../observable/ObservableValue";
 
 const PICKLE_KEY = "DEFAULT_KEY";
@@ -109,7 +109,7 @@ export class Session {
         return this._sessionInfo.userId;
     }
 
-    /** @internal call SessionContainer.logout instead */
+    /** @internal call Client.logout instead */
     async logout(log = undefined) {
         await this._hsApi.logout({log}).response();
     }

@@ -188,7 +188,7 @@ import {NullLogItem, NullLogger} from "../../../../logging/NullLogger";
 import {HomeServer as MockHomeServer} from "../../../../mocks/HomeServer.js";
 // other imports
 import {BaseMessageTile} from "./tiles/BaseMessageTile.js";
-import {MappedList} from "../../../../observable/list/MappedList.js";
+import {MappedList} from "../../../../observable/list/MappedList";
 import {ObservableValue} from "../../../../observable/ObservableValue";
 import {PowerLevels} from "../../../../matrix/room/PowerLevels.js";
 
@@ -225,7 +225,7 @@ export function tests() {
                 return new BaseMessageTile({entry, roomVM: {room}, timeline, platform: {logger}});
             }
             return null;
-        }, (tile, params, entry) => tile?.updateEntry(entry, params));
+        }, (tile, params, entry) => tile?.updateEntry(entry, params, function () {}));
         return tiles;
     }
 
@@ -254,8 +254,14 @@ export function tests() {
             // 2. setup queue & timeline
             const queue = new SendQueue({roomId, storage, hsApi: new MockHomeServer().api});
             const powerLevelsObservable = new ObservableValue(new PowerLevels({ ownUserId: alice, membership: "join" }));
-            const timeline = new Timeline({roomId, storage, fragmentIdComparer,
-                clock: new MockClock(), pendingEvents: queue.pendingEvents, powerLevelsObservable});
+            const timeline = new Timeline({
+                roomId,
+                storage,
+                fragmentIdComparer,
+                clock: new MockClock(),
+                pendingEvents: queue.pendingEvents,
+                powerLevelsObservable
+            });
             // 3. load the timeline, which will load the message with the reaction
             await timeline.load(new User(alice), "join", new NullLogItem());
             const tiles = mapMessageEntriesToBaseMessageTile(timeline, queue);

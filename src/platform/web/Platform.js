@@ -17,7 +17,7 @@ limitations under the License.
 import {createFetchRequest} from "./dom/request/fetch.js";
 import {xhrRequest} from "./dom/request/xhr.js";
 import {StorageFactory} from "../../matrix/storage/idb/StorageFactory";
-import {SessionInfoStorage} from "../../matrix/sessioninfo/localstorage/SessionInfoStorage.js";
+import {SessionInfoStorage} from "../../matrix/sessioninfo/localstorage/SessionInfoStorage";
 import {SettingsStorage} from "./dom/SettingsStorage.js";
 import {Encoding} from "./utils/Encoding.js";
 import {OlmWorker} from "../../matrix/e2ee/OlmWorker.js";
@@ -35,7 +35,7 @@ import {WorkerPool} from "./dom/WorkerPool.js";
 import {BlobHandle} from "./dom/BlobHandle.js";
 import {hasReadPixelPermission, ImageHandle, VideoHandle} from "./dom/ImageHandle.js";
 import {downloadInIframe} from "./dom/download.js";
-import {Disposables} from "../../utils/Disposables.js";
+import {Disposables} from "../../utils/Disposables";
 import {parseHTML} from "./parsehtml.js";
 import {handleAvatarError} from "./ui/avatar.js";
 
@@ -67,21 +67,22 @@ async function loadOlm(olmPaths) {
     }
     return null;
 }
-
-// make path relative to basePath,
-// assuming it and basePath are relative to document
-function relPath(path, basePath) {
-    const idx = basePath.lastIndexOf("/");
-    const dir = idx === -1 ? "" : basePath.slice(0, idx);
-    const dirCount = dir.length ? dir.split("/").length : 0;
-    return "../".repeat(dirCount) + path;
+// turn asset path to absolute path if it isn't already
+// so it can be loaded independent of base
+function assetAbsPath(assetPath) {
+    if (!assetPath.startsWith("/")) {
+        return new URL(assetPath, document.location.href).pathname;
+    }
+    return assetPath;
 }
 
-async function loadOlmWorker(config) {
-    const workerPool = new WorkerPool(config.worker, 4);
+async function loadOlmWorker(assetPaths) {
+    const workerPool = new WorkerPool(assetPaths.worker, 4);
     await workerPool.init();
-    const path = relPath(config.olm.legacyBundle, config.worker);
-    await workerPool.sendAll({type: "load_olm", path});
+    await workerPool.sendAll({
+        type: "load_olm",
+        path: assetAbsPath(assetPaths.olm.legacyBundle)
+    });
     const olmWorker = new OlmWorker(workerPool);
     return olmWorker;
 }
@@ -125,24 +126,21 @@ function adaptUIOnVisualViewportResize(container) {
 }
 
 export class Platform {
-    constructor(container, config, cryptoExtras = null, options = null) {
-        this._config = config;
+    constructor(container, assetPaths, config, options = null, cryptoExtras = null) {
         this._container = container;
+        this._assetPaths = assetPaths;
+        this._config = config;
         this.settingsStorage = new SettingsStorage("hydrogen_setting_v1_");
         this.clock = new Clock();
         this.encoding = new Encoding();
         this.random = Math.random;
-        if (options?.development) {
-            this.logger = new ConsoleLogger({platform: this});
-        } else {
-            this.logger = new IDBLogger({name: "hydrogen_logs", platform: this});
-        }
+        this._createLogger(options?.development);
         this.history = new History();
         this.onlineStatus = new OnlineStatus();
         this._serviceWorkerHandler = null;
-        if (config.serviceWorker && "serviceWorker" in navigator) {
+        if (assetPaths.serviceWorker && "serviceWorker" in navigator) {
             this._serviceWorkerHandler = new ServiceWorkerHandler();
-            this._serviceWorkerHandler.registerAndStart(config.serviceWorker);
+            this._serviceWorkerHandler.registerAndStart(assetPaths.serviceWorker);
         }
         this.notificationService = new NotificationService(this._serviceWorkerHandler, config.push);
         this.crypto = new Crypto(cryptoExtras);
@@ -160,6 +158,23 @@ export class Platform {
         const isIOS = /iPad|iPhone|iPod/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) && !window.MSStream;
         this.isIOS = isIOS;
         this._disposables = new Disposables();
+        this._olmPromise = undefined;
+        this._workerPromise = undefined;
+    }
+
+    _createLogger(isDevelopment) {
+        // Make sure that loginToken does not end up in the logs
+        const transformer = (item) => {
+            if (item.e?.stack) {
+                item.e.stack = item.e.stack.replace(/\/\?loginToken=(.+)/, "?loginToken=<snip>");
+            }
+            return item;
+        };
+        if (isDevelopment) {
+            this.logger = new ConsoleLogger({platform: this});
+        } else {
+            this.logger = new IDBLogger({name: "hydrogen_logs", platform: this, serializedTransformer: transformer});
+        }
     }
 
     get updateService() {
@@ -167,7 +182,10 @@ export class Platform {
     }
 
     loadOlm() {
-        return loadOlm(this._config.olm);
+        if (!this._olmPromise) {
+            this._olmPromise = loadOlm(this._assetPaths.olm);
+        }
+        return this._olmPromise;
     }
 
     get config() {
@@ -176,7 +194,10 @@ export class Platform {
 
     async loadOlmWorker() {
         if (!window.WebAssembly) {
-            return await loadOlmWorker(this._config);
+            if (!this._workerPromise) {
+                this._workerPromise = loadOlmWorker(this._assetPaths);
+            }
+            return this._workerPromise;
         }
     }
 
@@ -210,7 +231,7 @@ export class Platform {
         if (navigator.msSaveBlob) {
             navigator.msSaveBlob(blobHandle.nativeBlob, filename);
         } else {
-            downloadInIframe(this._container, this._config.downloadSandbox, blobHandle, filename, this.isIOS);
+            downloadInIframe(this._container, this._assetPaths.downloadSandbox, blobHandle, filename, this.isIOS);
         }
     }
 
@@ -265,10 +286,37 @@ export class Platform {
     }
 
     get version() {
-        return window.HYDROGEN_VERSION;
+        return DEFINE_VERSION;
     }
 
     dispose() {
         this._disposables.dispose();
     }
+}
+
+import {LogItem} from "../../logging/LogItem";
+export function tests() {
+    return {
+        "loginToken should not be in logs": (assert) => {
+            const transformer = (item) => {
+                if (item.e?.stack) {
+                    item.e.stack = item.e.stack.replace(/(?<=\/\?loginToken=).+/, "<snip>");
+                }
+                return item;
+            };
+            const logger = {
+                _queuedItems: [],
+                _serializedTransformer: transformer,
+                _now: () => {}
+            };
+            logger.persist = IDBLogger.prototype._persistItem.bind(logger);
+            const logItem = new LogItem("test", 1, logger);
+            logItem.error = new Error();
+            logItem.error.stack = "main http://localhost:3000/src/main.js:55\n<anonymous> http://localhost:3000/?loginToken=secret:26"
+            logger.persist(logItem, null, false);
+            const item = logger._queuedItems.pop();
+            console.log(item);
+            assert.strictEqual(item.json.search("secret"), -1);
+        }
+    };
 }

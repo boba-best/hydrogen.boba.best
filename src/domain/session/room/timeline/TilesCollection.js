@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 import {BaseObservableList} from "../../../../observable/list/BaseObservableList";
-import {sortedIndex} from "../../../../utils/sortedIndex.js";
+import {sortedIndex} from "../../../../utils/sortedIndex";
 
 // maps 1..n entries to 0..1 tile. Entries are what is stored in the timeline, either an event or fragmentboundary
 // for now, tileCreator should be stable in whether it returns a tile or not.
@@ -150,7 +150,7 @@ export class TilesCollection extends BaseObservableList {
         const tileIdx = this._findTileIdx(entry);
         const tile = this._findTileAtIdx(entry, tileIdx);
         if (tile) {
-            const action = tile.updateEntry(entry, params);
+            const action = tile.updateEntry(entry, params, this._tileCreator);
             if (action.shouldReplace) {
                 const newTile = this._tileCreator(entry);
                 if (newTile) {
@@ -253,7 +253,7 @@ export class TilesCollection extends BaseObservableList {
     }
 }
 
-import {ObservableArray} from "../../../../observable/list/ObservableArray.js";
+import {ObservableArray} from "../../../../observable/list/ObservableArray";
 import {UpdateAction} from "./UpdateAction.js";
 
 export function tests() {
