@@ -30,7 +30,6 @@ export class MessageComposer extends TemplateView {
 
     render(t, vm) {
         this._input = t.textarea({
-            enterkeyhint: 'send',
             onKeydown: e => this._onKeyDown(e),
             onInput: () => {
                 vm.setInput(this._input.value);
@@ -40,7 +39,7 @@ export class MessageComposer extends TemplateView {
                     this._clearHeight();
                 }
             },
-            placeholder: vm.isEncrypted ? "Send an encrypted message…" : "Send a message…",
+            placeholder: vm => vm.isEncrypted ? "Send an encrypted message…" : "Send a message…",
             rows: "1"
         });
         this._focusInput = () => this._input.focus();

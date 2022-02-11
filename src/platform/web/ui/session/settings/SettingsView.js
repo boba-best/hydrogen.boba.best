@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 import {TemplateView} from "../../general/TemplateView";
-import {SessionBackupSettingsView} from "./SessionBackupSettingsView.js"
+import {KeyBackupSettingsView} from "./KeyBackupSettingsView.js"
 
 export class SettingsView extends TemplateView {
     render(t, vm) {
@@ -42,17 +42,13 @@ export class SettingsView extends TemplateView {
             row(t, vm.i18n`Session ID`, vm.deviceId, "code"),
             row(t, vm.i18n`Session key`, vm.fingerprintKey, "code"),
             row(t, "", t.button({
-                onClick: () => {
-                    if (confirm(vm.i18n`Are you sure you want to log out?`)) {
-                        vm.logout();
-                    }
-                },
+                onClick: () => vm.logout(),
                 disabled: vm => vm.isLoggingOut
             }, vm.i18n`Log out`)),
         );
         settingNodes.push(
-            t.h3("Session Backup"),
-            t.view(new SessionBackupSettingsView(vm.sessionBackupViewModel))
+            t.h3("Key backup"),
+            t.view(new KeyBackupSettingsView(vm.keyBackupViewModel))
         );
 
         settingNodes.push(

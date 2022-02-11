@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 import {ViewModel} from "../../ViewModel.js";
-import {SessionBackupViewModel} from "./SessionBackupViewModel.js";
+import {KeyBackupViewModel} from "./KeyBackupViewModel.js";
 
 class PushNotificationStatus {
     constructor() {
@@ -43,14 +43,13 @@ export class SettingsViewModel extends ViewModel {
         this._updateService = options.updateService;
         const {client} = options;
         this._client = client;
-        this._sessionBackupViewModel = this.track(new SessionBackupViewModel(this.childOptions({session: this._session})));
+        this._keyBackupViewModel = this.track(new KeyBackupViewModel(this.childOptions({session: this._session})));
         this._closeUrl = this.urlCreator.urlUntilSegment("session");
         this._estimate = null;
         this.sentImageSizeLimit = null;
         this.minSentImageSizeLimit = 400;
         this.maxSentImageSizeLimit = 4000;
         this.pushNotifications = new PushNotificationStatus();
-        this._isLoggingOut = false;
     }
 
     get _session() {
@@ -58,13 +57,8 @@ export class SettingsViewModel extends ViewModel {
     }
 
     async logout() {
-        this._isLoggingOut = true;
-        await this._client.logout();
-        this.emitChange("isLoggingOut");
-        this.navigation.push("session", true);
+        this.navigation.push("logout", this._client.sessionId);
     }
-
-    get isLoggingOut() { return this._isLoggingOut; }
 
     setSentImageSizeLimit(size) {
         if (size > this.maxSentImageSizeLimit || size < this.minSentImageSizeLimit) {
@@ -121,8 +115,8 @@ export class SettingsViewModel extends ViewModel {
         return !!this.platform.updateService;
     }
 
-    get sessionBackupViewModel() {
-        return this._sessionBackupViewModel;
+    get keyBackupViewModel() {
+        return this._keyBackupViewModel;
     }
 
     get storageQuota() {

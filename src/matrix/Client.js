@@ -30,6 +30,7 @@ import {PasswordLoginMethod} from "./login/PasswordLoginMethod";
 import {TokenLoginMethod} from "./login/TokenLoginMethod";
 import {SSOLoginHelper} from "./login/SSOLoginHelper";
 import {getDehydratedDevice} from "./e2ee/Dehydration.js";
+import {Registration} from "./registration/Registration";
 
 export const LoadStatus = createEnum(
     "NotLoading",
@@ -129,6 +130,17 @@ export class Client {
             const response = await setAbortable(hsApi.getLoginFlows()).response();
             return this._parseLoginOptions(response, homeserver);
         });
+    }
+
+    async startRegistration(homeserver, username, password, initialDeviceDisplayName) {
+        const request = this._platform.request;
+        const hsApi = new HomeServerApi({homeserver, request});
+        const registration = new Registration(hsApi, {
+            username, 
+            password,
+            initialDeviceDisplayName,
+        });
+        return registration;
     }
 
     async startWithLogin(loginMethod, {inspectAccountSetup} = {}) {
@@ -386,10 +398,21 @@ export class Client {
         return !this._reconnector;
     }
 
-    logout() {
+    startLogout(sessionId) {
         return this._platform.logger.run("logout", async log => {
+            this._sessionId = sessionId;
+            log.set("id", this._sessionId);
+            const sessionInfo = await this._platform.sessionInfoStorage.get(this._sessionId);
+            if (!sessionInfo) {
+                throw new Error(`Could not find session for id ${this._sessionId}`);
+            }
             try {
-                await this._session?.logout(log);
+                const hsApi = new HomeServerApi({
+                    homeserver: sessionInfo.homeServer,
+                    accessToken: sessionInfo.accessToken,
+                    request: this._platform.request
+                });
+                await hsApi.logout({log}).response();
             } catch (err) {}
             await this.deleteSession(log);
         });
